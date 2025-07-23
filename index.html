@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Seasonality Explorer</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .calendar-cell {
+            transition: all 0.3s ease;
+        }
+        
+        .calendar-cell:hover {
+            transform: scale(1.05);
+            z-index: 10;
+        }
+
+        .tooltip {
+            display: none;
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            z-index: 1000;
+        }
+
+        .selected {
+            border: 2px solid #3B82F6 !important;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-panel {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 60vh;
+                transform: translateY(100%);
+                transition: transform 0.3s ease;
+            }
+
+            .dashboard-panel.active {
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="min-h-screen p-4">
+        <!-- Header -->
+        <header class="mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">Market Seasonality Explorer</h1>
+            <div class="flex flex-wrap gap-4 mt-4">
+                <select id="timeframeSelect" class="p-2 border rounded">
+                    <option value="daily">Daily View</option>
+                    <option value="weekly">Weekly View</option>
+                    <option value="monthly">Monthly View</option>
+                </select>
+                <select id="instrumentSelect" class="p-2 border rounded">
+                    <option value="BTC">Bitcoin (BTC)</option>
+                    <option value="ETH">Ethereum (ETH)</option>
+                    <option value="SOL">Solana (SOL)</option>
+                </select>
+                <button id="exportBtn" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                    <i class="bi bi-download me-2"></i> Export Data
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Calendar Section -->
+            <div class="lg:col-span-2 bg-white rounded-lg shadow p-4">
+                <div class="flex justify-between items-center mb-4">
+                    <button id="prevMonth" class="p-2 hover:bg-gray-100 rounded">
+                        <i class="bi bi-chevron-left"></i>
+                    </button>
+                    <h2 id="currentMonth" class="text-xl font-semibold"></h2>
+                    <button id="nextMonth" class="p-2 hover:bg-gray-100 rounded">
+                        <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+                <div class="grid grid-cols-7 gap-2 mb-2">
+                    <div class="text-center font-semibold">Sun</div>
+                    <div class="text-center font-semibold">Mon</div>
+                    <div class="text-center font-semibold">Tue</div>
+                    <div class="text-center font-semibold">Wed</div>
+                    <div class="text-center font-semibold">Thu</div>
+                    <div class="text-center font-semibold">Fri</div>
+                    <div class="text-center font-semibold">Sat</div>
+                </div>
+                <div id="calendar" class="grid grid-cols-7 gap-2"></div>
+            </div>
+
+            <!-- Dashboard Panel -->
+            <div id="dashboardPanel" class="bg-white rounded-lg shadow p-4">
+                <h3 class="text-xl font-semibold mb-4">Market Analysis</h3>
+                <div class="space-y-4">
+                    <div>
+                        <h4 class="font-medium mb-2">Price Information</h4>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div class="bg-gray-50 p-2 rounded">
+                                <div class="text-sm text-gray-600">Open</div>
+                                <div id="openPrice" class="font-semibold">$0.00</div>
+                            </div>
+                            <div class="bg-gray-50 p-2 rounded">
+                                <div class="text-sm text-gray-600">Close</div>
+                                <div id="closePrice" class="font-semibold">$0.00</div>
+                            </div>
+                            <div class="bg-gray-50 p-2 rounded">
+                                <div class="text-sm text-gray-600">High</div>
+                                <div id="highPrice" class="font-semibold">$0.00</div>
+                            </div>
+                            <div class="bg-gray-50 p-2 rounded">
+                                <div class="text-sm text-gray-600">Low</div>
+                                <div id="lowPrice" class="font-semibold">$0.00</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <h4 class="font-medium mb-2">Volume & Volatility</h4>
+                        <canvas id="volumeChart" height="200"></canvas>
+                    </div>
+                    <div>
+                        <h4 class="font-medium mb-2">Technical Indicators</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span>RSI (14)</span>
+                                <span id="rsiValue">0.00</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>MA (20)</span>
+                                <span id="maValue">$0.00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize variables
+        let currentDate = new Date();
+        let selectedDates = [];
+        let volumeChart = null;
+
+        // Initialize the calendar
+        function initCalendar() {
+            const calendar = document.getElementById('calendar');
+            const currentMonth = document.getElementById('currentMonth');
+            
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            
+            currentMonth.textContent = new Date(year, month).toLocaleString('default', { month: 'long', year: 'numeric' });
+            
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            
+            calendar.innerHTML = '';
+            
+            // Add empty cells for days before the first day of the month
+            for (let i = 0; i < firstDay; i++) {
+                const cell = createCalendarCell('');
+                calendar.appendChild(cell);
+            }
+            
+            // Add cells for each day of the month
+            for (let day = 1; day <= daysInMonth; day++) {
+                const cell = createCalendarCell(day);
+                calendar.appendChild(cell);
+            }
+        }
+
+        // Create a calendar cell with random market data
+        function createCalendarCell(day) {
+            const cell = document.createElement('div');
+            cell.className = 'calendar-cell relative aspect-square border rounded p-2 cursor-pointer';
+            
+            if (day) {
+                // Random market data
+                const volatility = Math.random();
+                const performance = Math.random() - 0.5;
+                const volume = Math.random() * 1000;
+                
+                // Set background color based on volatility
+                cell.style.backgroundColor = getVolatilityColor(volatility);
+                
+                // Create cell content
+                cell.innerHTML = `
+                    <div class="text-sm font-semibold">${day}</div>
+                    <div class="mt-1">
+                        <i class="bi ${performance > 0 ? 'bi-arrow-up-right text-green-500' : 'bi-arrow-down-right text-red-500'}"></i>
+                        <div class="text-xs">${Math.abs(performance * 100).toFixed(2)}%</div>
+                    </div>
+                    <div class="absolute bottom-1 right-1 text-xs">
+                        ${formatVolume(volume)}
+                    </div>
+                `;
+
+                // Add click event
+                cell.addEventListener('click', () => selectDate(day));
+                
+                // Add hover tooltip
+                cell.addEventListener('mouseenter', (e) => showTooltip(e, day, volatility, performance, volume));
+                cell.addEventListener('mouseleave', hideTooltip);
+            }
+            
+            return cell;
+        }
+
+        // Helper functions
+        function getVolatilityColor(volatility) {
+            if (volatility < 0.33) return '#d1fae5'; // Green shade
+            if (volatility < 0.66) return '#fef3c7'; // Yellow shade
+            return '#fee2e2'; // Red shade
+        }
+
+        function formatVolume(volume) {
+            return `${volume.toFixed(0)}K`;
+        }
+
+        function showTooltip(event, day, volatility, performance, volume) {
+            const tooltip = document.createElement('div');
+            tooltip.className = 'tooltip';
+            tooltip.innerHTML = `
+                <div>Date: ${currentDate.getFullYear()}-${currentDate.getMonth() + 1}-${day}</div>
+                <div>Volatility: ${(volatility * 100).toFixed(2)}%</div>
+                <div>Performance: ${(performance * 100).toFixed(2)}%</div>
+                <div>Volume: ${formatVolume(volume)}</div>
+            `;
+            
+            document.body.appendChild(tooltip);
+            
+            const rect = event.target.getBoundingClientRect();
+            tooltip.style.left = `${rect.left}px`;
+            tooltip.style.top = `${rect.top - tooltip.offsetHeight - 5}px`;
+            tooltip.style.display = 'block';
+        }
+
+        function hideTooltip() {
+            const tooltips = document.querySelectorAll('.tooltip');
+            tooltips.forEach(tooltip => tooltip.remove());
+        }
+
+        function selectDate(day) {
+            const cells = document.querySelectorAll('.calendar-cell');
+            cells.forEach(cell => cell.classList.remove('selected'));
+            
+            const selectedCell = [...cells].find(cell => cell.textContent.includes(day.toString()));
+            if (selectedCell) {
+                selectedCell.classList.add('selected');
+                updateDashboard(day);
+            }
+        }
+
+        function updateDashboard(day) {
+            // Update price information with random data
+            document.getElementById('openPrice').textContent = `$${(Math.random() * 1000).toFixed(2)}`;
+            document.getElementById('closePrice').textContent = `$${(Math.random() * 1000).toFixed(2)}`;
+            document.getElementById('highPrice').textContent = `$${(Math.random() * 1000).toFixed(2)}`;
+            document.getElementById('lowPrice').textContent = `$${(Math.random() * 1000).toFixed(2)}`;
+            document.getElementById('rsiValue').textContent = (Math.random() * 100).toFixed(2);
+            document.getElementById('maValue').textContent = `$${(Math.random() * 1000).toFixed(2)}`;
+
+            // Update volume chart
+            updateVolumeChart();
+        }
+
+        function updateVolumeChart() {
+            const ctx = document.getElementById('volumeChart').getContext('2d');
+            
+            if (volumeChart) {
+                volumeChart.destroy();
+            }
+
+            const data = Array.from({length: 24}, () => Math.random() * 100);
+            
+            volumeChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Array.from({length: 24}, (_, i) => `${i}:00`),
+                    datasets: [{
+                        label: 'Volume',
+                        data: data,
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderColor: 'rgba(59, 130, 246, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Event listeners
+        document.getElementById('prevMonth').addEventListener('click', () => {
+            currentDate.setMonth(currentDate.getMonth() - 1);
+            initCalendar();
+        });
+
+        document.getElementById('nextMonth').addEventListener('click', () => {
+            currentDate.setMonth(currentDate.getMonth() + 1);
+            initCalendar();
+        });
+
+        document.getElementById('exportBtn').addEventListener('click', () => {
+            alert('Data exported successfully!');
+        });
+
+        // Initialize the application
+        initCalendar();
+        updateDashboard(1);
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
